@@ -1,0 +1,8 @@
+ACCOUNT CONTEXT: Harbor Pet Supply | Monthly spend: $950 | Active coupon: $75 ad credit | Goal: online sales
+
+TRANSCRIPT:
+Rep: Hi, this is William with Northstar Ads. Am I speaking with Kevin Brooks?
+Gatekeeper: Kevin's out of the office today. Can I take a message?
+Rep: Sure. Just so you know, this call is on a recorded line for quality purposes. Could you let Kevin know William from Northstar Ads called about his advertising account? He can reach me at the number on his account page, or I'll try him again tomorrow afternoon.
+Gatekeeper: Got it. I'll pass that along.
+Rep: Thank you, have a good day.

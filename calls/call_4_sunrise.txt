@@ -1,0 +1,13 @@
+ACCOUNT CONTEXT: Sunrise Dental Group | Monthly spend: $2,000 | Active coupon: $250 ad credit, expires in 10 days | Goal: new patient bookings
+
+TRANSCRIPT:
+Rep: Hi, this is William with Northstar Ads. Am I speaking with Dr. Patel?
+Gatekeeper: This is the front desk. Dr. Patel is between patients. What is this regarding?
+Rep: I'm calling about their advertising account. Just so you know, this call is on a recorded line for quality purposes.
+Gatekeeper: Okay, hold on. Let me see if she can grab a minute.
+Advertiser: Hi, this is Dr. Patel.
+Rep: Hi Dr. Patel, thanks for jumping on. Your campaigns are doing well. At $2,000 a month, you're averaging about 30 new patient bookings. If we increased to $2,400, we'd expect around 6 to 8 more bookings per month.
+Advertiser: I'd need to talk to my office manager before changing the budget.
+Rep: Of course. Would it help if I sent a short summary you could share with her?
+Advertiser: Yes, please send that over.
+Rep: Will do. Thanks, Dr. Patel.

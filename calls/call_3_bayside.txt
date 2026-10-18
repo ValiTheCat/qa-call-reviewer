@@ -1,0 +1,12 @@
+ACCOUNT CONTEXT: Bayside Auto Repair | Monthly spend: $600 | Active coupon: None | Goal: more phone calls for appointments
+
+TRANSCRIPT:
+Rep: Hi, this is William with Northstar Ads. Am I speaking with Tom Reyes?
+Advertiser: Speaking.
+Rep: Hi Tom. Quick note, this call is on a recorded line for quality purposes. Is that okay?
+Advertiser: Yeah, go ahead.
+Rep: So I just wanted to check in on your budget. You might want to think about raising it, since more budget usually means better results.
+Advertiser: I don't know. I tried spending more last year and didn't really see a difference.
+Rep: Yeah, it can depend. Just something to think about.
+Advertiser: Okay, I'll think about it.
+Rep: Sounds good. Have a great day.
