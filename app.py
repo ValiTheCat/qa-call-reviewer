@@ -3,6 +3,7 @@
 Auditors load calls, the AI gives every call a first pass, and the
 priority queue shows which calls need a human to listen first.
 """
+import csv
 import html
 from pathlib import Path
 
@@ -70,6 +71,27 @@ def review_call(text: str) -> dict:
     return analyze_call(text)
 
 
+@st.cache_data(show_spinner=False)
+def transcribe(audio_bytes: bytes) -> str:
+    """Cached so the same recording is never transcribed twice."""
+    from transcriber import transcribe_audio  # only needed for audio
+    return transcribe_audio(audio_bytes)
+
+
+def load_accounts() -> dict:
+    with open("accounts.csv", newline="", encoding="utf-8") as f:
+        return {row["account"]: row for row in csv.DictReader(f)}
+
+
+def context_line(acct: dict) -> str:
+    return (f"ACCOUNT CONTEXT: {acct['account']} | Monthly spend: {acct['monthly_spend']} | "
+            f"Active coupon: {acct['coupon']} | Goal: {acct['goal']}")
+
+
+def stamp(item: dict) -> str:
+    return (item.get("timestamp") or "").strip()
+
+
 def account_name(text: str, fallback: str) -> str:
     """Pull the account name from the ACCOUNT CONTEXT line."""
     for line in text.splitlines():
@@ -112,9 +134,10 @@ def badges(r: dict) -> str:
     return '<div class="badges">' + "".join(spans) + "</div>"
 
 
-def check_card(title: str, value: str, evidence: str = "") -> str:
+def check_card(title: str, value: str, evidence: str = "", ts: str = "") -> str:
     label = CHECK_LABELS.get(value, value)
-    quote = f'<div class="quote">"{html.escape(evidence)}"</div>' if evidence and value != "not_applicable" else ""
+    at = f"{html.escape(ts)} " if ts else ""
+    quote = f'<div class="quote">{at}"{html.escape(evidence)}"</div>' if evidence and value != "not_applicable" else ""
     return (f'<div class="check"><div class="name">{title}</div>'
             f'<div class="res {result_class(value)}">{label}</div>{quote}</div>')
 
@@ -122,29 +145,46 @@ def check_card(title: str, value: str, evidence: str = "") -> str:
 # ---------- State ----------
 st.session_state.setdefault("calls", {})     # name -> transcript text
 st.session_state.setdefault("results", {})   # name -> scorecard
+st.session_state.setdefault("audio", {})     # name -> recording bytes
 
 # ---------- Sidebar: load and review calls ----------
 with st.sidebar:
     st.header("Load calls")
-    source = st.radio("Calls to review", ["Sample calls", "Upload transcripts"])
+    source = st.radio("Calls to review", ["Sample calls", "Upload transcripts", "Upload audio"])
 
-    calls = {}
+    calls, audio_items = {}, []
     if source == "Sample calls":
         for f in sorted(Path("calls").glob("*.txt")):
             text = f.read_text(encoding="utf-8")
             calls[account_name(text, f.stem)] = text
         st.caption(f"{len(calls)} mock calls with fictional accounts.")
-    else:
+    elif source == "Upload transcripts":
         uploads = st.file_uploader("Transcript files (.txt)", type="txt", accept_multiple_files=True)
         for up in uploads or []:
             text = up.read().decode("utf-8")
             calls[account_name(text, Path(up.name).stem)] = text
         st.caption("Start each file with an ACCOUNT CONTEXT line, then the transcript.")
+    else:
+        accounts = load_accounts()
+        uploads = st.file_uploader("Call recordings", type=["mp3", "wav", "m4a"], accept_multiple_files=True)
+        for up in uploads or []:
+            acct = st.selectbox(f"Account for {up.name}", list(accounts), key=f"acct_{up.name}")
+            audio_items.append((f"{acct} ({Path(up.name).stem})", up.getvalue(), accounts[acct]))
+        st.caption("Recordings are transcribed with speaker labels and timestamps, then reviewed.")
 
-    if st.button("Review calls", type="primary", disabled=not calls, use_container_width=True):
+    ready = bool(calls or audio_items)
+    if st.button("Review calls", type="primary", disabled=not ready, use_container_width=True):
+        st.session_state.results, st.session_state.audio = {}, {}
+        progress = st.progress(0.0, text="Starting")
+        for name, data, acct in audio_items:
+            progress.progress(0.0, text=f"Transcribing {name}")
+            try:
+                transcript = transcribe(data)
+                calls[name] = f"{context_line(acct)}\n\nTRANSCRIPT (from audio):\n{transcript}"
+                st.session_state.audio[name] = data
+            except Exception as e:
+                st.error(f"{name}: could not be transcribed ({e})")
         st.session_state.calls = calls
-        st.session_state.results = {}
-        progress = st.progress(0.0, text="Reviewing calls")
         for i, (name, text) in enumerate(calls.items(), start=1):
             try:
                 st.session_state.results[name] = review_call(text)
@@ -214,16 +254,32 @@ with tab_cards:
     if r["overall"].get("format_warning"):
         st.warning(r["overall"]["format_warning"])
 
+    if name in st.session_state.audio:
+        jumps = [("Disclosure", stamp(r["disclosure"])), ("Budget pitch", stamp(r["budget_pitch"]))]
+        jumps += [(f"Objection {i}", stamp(o)) for i, o in enumerate(r["objections"], start=1)]
+        jumps = [(label, ts) for label, ts in jumps if ts]
+        if jumps:
+            cols = st.columns(len(jumps) + 1)
+            cols[0].markdown("**Jump to:**")
+            for col, (label, ts) in zip(cols[1:], jumps):
+                if col.button(f"{label} {ts}", key=f"jump_{name}_{label}"):
+                    from transcriber import to_seconds
+                    st.session_state[f"start_{name}"] = to_seconds(ts)
+        st.audio(st.session_state.audio[name], start_time=st.session_state.get(f"start_{name}", 0))
+        if r.get("speaker_roles"):
+            st.caption(f"Speakers identified by AI: {r['speaker_roles']}")
+
     c1, c2, c3 = st.columns(3)
-    c1.markdown(check_card("Recorded-line disclosure", r["disclosure"]["result"], r["disclosure"].get("evidence", "")), unsafe_allow_html=True)
-    c2.markdown(check_card("Budget pitch", r["budget_pitch"]["result"], r["budget_pitch"].get("evidence", "")), unsafe_allow_html=True)
+    c1.markdown(check_card("Recorded-line disclosure", r["disclosure"]["result"], r["disclosure"].get("evidence", ""), stamp(r["disclosure"])), unsafe_allow_html=True)
+    c2.markdown(check_card("Budget pitch", r["budget_pitch"]["result"], r["budget_pitch"].get("evidence", ""), stamp(r["budget_pitch"])), unsafe_allow_html=True)
     c3.markdown(check_card("Coupon", r["coupon"]["result"]), unsafe_allow_html=True)
 
     st.markdown("#### Objections")
     if r["objections"]:
         for o in r["objections"]:
             outcome = CHECK_LABELS.get(o["outcome"], o["outcome"])
-            st.markdown(f"**{o['objection']}**  \nRep: {o['rep_response']}  \nOutcome: {outcome}")
+            at = f" ({stamp(o)})" if stamp(o) else ""
+            st.markdown(f"**{o['objection']}**{at}  \nRep: {o['rep_response']}  \nOutcome: {outcome}")
     else:
         st.write("No objections raised.")
 

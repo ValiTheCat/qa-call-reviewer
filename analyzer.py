@@ -17,6 +17,10 @@ v3 changes:
 - Structured output: the AI must fill in a defined schema (via a forced tool
   call) instead of being asked nicely to write JSON
 - Validation also catches values outside the allowed options
+v4 changes:
+- Handles audio transcripts: speakers arrive as "Speaker A/B/C" with [m:ss]
+  timestamps; the AI identifies who is the rep, gatekeeper and advertiser
+- Each finding includes the timestamp so auditors can jump to the moment
 """
 import json
 import tomllib
@@ -25,7 +29,7 @@ from pathlib import Path
 import anthropic
 
 MODEL = "claude-sonnet-4-6"
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 SYSTEM_PROMPT = """You are a QA auditor reviewing sales calls for an advertising platform.
 Review the call transcript using the account context provided, and check:
@@ -50,6 +54,13 @@ Review the call transcript using the account context provided, and check:
 4. Coupon: Only applies if the account context shows an active coupon AND the rep
    reached the decision maker. Otherwise mark not_applicable.
 
+AUDIO TRANSCRIPTS: Some transcripts come from audio recordings. Speakers are
+labeled "Speaker A", "Speaker B", and so on, and each line starts with an [m:ss]
+timestamp. First work out which speaker is the rep, the advertiser (decision
+maker), and any gatekeeper from what they say, then apply the checks above.
+Transcription can contain small errors; judge meaning, not exact wording.
+When a transcript has timestamps, give the m:ss of each piece of evidence.
+
 Submit your review using the submit_scorecard tool."""
 
 ALLOWED = {
@@ -61,12 +72,19 @@ ALLOWED = {
 }
 
 
+TIMESTAMP = {"type": "string",
+             "description": "m:ss where the evidence occurs, if the transcript has timestamps; otherwise empty."}
+
+
 def _check(allowed: list, with_evidence: bool = True) -> dict:
     props = {"result": {"type": "string", "enum": allowed},
              "reason": {"type": "string", "description": "One sentence."}}
     if with_evidence:
         props["evidence"] = {"type": "string", "description": "Short quote from the transcript."}
-    return {"type": "object", "properties": props, "required": list(props)}
+    required = list(props)
+    if with_evidence:
+        props["timestamp"] = TIMESTAMP
+    return {"type": "object", "properties": props, "required": required}
 
 
 # The schema the AI must fill in. Forcing this tool guarantees the structure.
@@ -86,11 +104,17 @@ SCORECARD_TOOL = {
                         "objection": {"type": "string"},
                         "rep_response": {"type": "string"},
                         "outcome": {"type": "string", "enum": ALLOWED["outcome"]},
+                        "timestamp": TIMESTAMP,
                     },
                     "required": ["objection", "rep_response", "outcome"],
                 },
             },
             "coupon": _check(ALLOWED["coupon"], with_evidence=False),
+            "speaker_roles": {
+                "type": "string",
+                "description": "For audio transcripts, who each speaker is, e.g. "
+                               "'A = Rep, B = Gatekeeper, C = Advertiser'. Empty otherwise.",
+            },
             "overall": {
                 "type": "object",
                 "properties": {
@@ -110,20 +134,20 @@ SEVERITY = ["pass", "coaching", "review", "high_priority"]
 _client = None
 
 
-def get_api_key() -> str:
+def get_secret(name: str) -> str:
     """Local runs read .streamlit/secrets.toml; Streamlit Cloud uses st.secrets."""
     path = Path(".streamlit/secrets.toml")
     if path.exists():
         with open(path, "rb") as f:
-            return tomllib.load(f)["ANTHROPIC_API_KEY"]
+            return tomllib.load(f)[name]
     import streamlit as st
-    return st.secrets["ANTHROPIC_API_KEY"]
+    return st.secrets[name]
 
 
 def get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=get_api_key())
+        _client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
     return _client
 
 
@@ -152,6 +176,7 @@ def normalize(result: dict) -> dict:
             problems.append(f"{check} result")
         part.setdefault("evidence", "")
         part.setdefault("reason", "")
+        part.setdefault("timestamp", "")
         result[check] = part
 
     if not isinstance(result.get("objections"), list):
@@ -160,9 +185,13 @@ def normalize(result: dict) -> dict:
     for o in result["objections"]:
         o.setdefault("objection", "Not specified")
         o.setdefault("rep_response", "Not specified")
+        o.setdefault("timestamp", "")
         if o.get("outcome") not in ALLOWED["outcome"]:
             o["outcome"] = "partial"
             problems.append("objection outcome")
+
+    if not isinstance(result.get("speaker_roles"), str):
+        result["speaker_roles"] = ""
 
     overall = result.get("overall")
     if not isinstance(overall, dict):
